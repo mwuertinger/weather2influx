@@ -37,6 +37,8 @@ func main() {
 		return
 	}
 
+	log.Printf("Initialized with config: %v", config)
+
 	ticker := time.NewTicker(config.Interval)
 	for {
 		select {
@@ -45,7 +47,8 @@ func main() {
 			if err != nil {
 				log.Printf("updateData: %v", err)
 			}
-		case <-sigChan:
+		case s := <-sigChan:
+			log.Printf("Received signal %v, terminating", s)
 			return
 		}
 	}
