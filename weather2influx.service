@@ -1,0 +1,10 @@
+[Unit]
+After=network.target
+
+[Service]
+DynamicUser=true
+ExecStart=/usr/local/bin/weather2influx /etc/weather2influx/weather2influx.conf
+Restart=always
+
+[Install]
+WantedBy = multi-user.target
