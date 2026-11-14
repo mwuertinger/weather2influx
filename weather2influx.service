@@ -44,8 +44,9 @@ ProcSubset=pid
 NoExecPaths=/
 ExecPaths=/usr/local/bin/weather2influx
 MemoryDenyWriteExecute=yes
-# /dev/shm stays the host's (shared, writable) even with PrivateDevices=; not needed.
-InaccessiblePaths=/dev/shm
+# The host's /dev/shm and /dev/mqueue stay visible and writable even with
+# PrivateDevices= (shared memory, POSIX message queues); not needed.
+InaccessiblePaths=/dev/shm /dev/mqueue
 
 # Kernel attack surface.
 ProtectKernelTunables=yes
@@ -77,7 +78,8 @@ RestrictAddressFamilies=AF_INET AF_INET6
 # filter by port). ::1 is not denied.
 # InfluxDB must be reached as [::1]:8086 (docker-proxy); 127.0.0.1:8086 is
 # DNATed by Docker to the container's 172.18.0.0/16 address and denied anyway.
-IPAddressDeny=127.0.0.0/8 10.0.0.0/8 100.64.0.0/10 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16 255.255.255.255/32 fc00::/7 fe80::/10 multicast
+IPAddressDeny=127.0.0.0/8 10.0.0.0/8 100.64.0.0/10 172.16.0.0/12 192.168.0.0/16
+IPAddressDeny=169.254.0.0/16 255.255.255.255/32 fc00::/7 fe80::/10 multicast
 IPAddressAllow=192.168.178.1/32 fd00::3681:c4ff:fe07:1275/128
 
 TasksMax=64
