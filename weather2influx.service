@@ -65,8 +65,14 @@ SystemCallErrorNumber=EPERM
 
 # Network: outgoing IPv4/IPv6 only (DNS, api.openweathermap.org and InfluxDB at
 # [::1]:8086). The pure-Go resolver of a static build needs no AF_UNIX. The API
-# is public, so there is no IPAddressAllow=.
+# is public, so outbound internet is not restricted.
 RestrictAddressFamilies=AF_INET AF_INET6
+# No LAN access: none of the destinations are on the LAN, except the DNS
+# resolvers (the router). Loopback is not on the deny list and stays reachable.
+# InfluxDB must be reached as [::1]:8086 (docker-proxy). 127.0.0.1:8086 is
+# DNATed by Docker to the container's 172.18.0.0/16 address, which is denied.
+IPAddressDeny=10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16 fc00::/7 fe80::/10 multicast
+IPAddressAllow=192.168.178.1/32 fd00::3681:c4ff:fe07:1275/128
 
 TasksMax=64
 
