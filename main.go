@@ -2,10 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
@@ -16,6 +18,13 @@ import (
 )
 
 var influxClient influxdb.Client
+
+// httpClient has a timeout so that a hung connection cannot stop the ticker
+// loop for good (http.DefaultClient has none).
+var httpClient = &http.Client{Timeout: 30 * time.Second}
+
+// owmBaseURL is the OpenWeatherMap current-weather endpoint (a variable for tests).
+var owmBaseURL = "https://api.openweathermap.org/data/2.5/weather"
 
 func main() {
 	sigChan := make(chan os.Signal, 1)
@@ -37,7 +46,10 @@ func main() {
 		return
 	}
 
-	log.Printf("Initialized with config: %v", config)
+	logConfig := *config
+	logConfig.WeatherMap.ApiKey = "<redacted>"
+	logConfig.Influx.Token = "<redacted>"
+	log.Printf("Initialized with config: %+v", logConfig)
 
 	ticker := time.NewTicker(config.Interval)
 	for {
@@ -76,15 +88,9 @@ func writeToInflux(weather *weather) error {
 		return err
 	}
 	tags := map[string]string{"location": "Outdoor"}
-	fields := map[string]interface{}{}
-	if weather.Main.Pressure > 0 {
-		fields["pressure"] = weather.Main.Pressure
-	}
-	if weather.Main.Temperature > 0 {
-		fields["temperature"] = weather.Main.Temperature
-	}
-	if weather.Main.Humidity > 0 {
-		fields["humidity"] = weather.Main.Humidity
+	fields := weatherFields(weather)
+	if len(fields) == 0 {
+		return fmt.Errorf("no measurements in API response")
 	}
 
 	log.Printf("writing to influx: %+v", fields)
@@ -102,17 +108,43 @@ func writeToInflux(weather *weather) error {
 	return nil
 }
 
+// weatherFields returns the InfluxDB fields for w. Only values missing from
+// the API response are skipped; zero and negative values (e.g. temperatures
+// at or below 0 °C) are valid measurements.
+func weatherFields(w *weather) map[string]interface{} {
+	fields := map[string]interface{}{}
+	if w.Main.Pressure != nil {
+		fields["pressure"] = *w.Main.Pressure
+	}
+	if w.Main.Temperature != nil {
+		fields["temperature"] = *w.Main.Temperature
+	}
+	if w.Main.Humidity != nil {
+		fields["humidity"] = *w.Main.Humidity
+	}
+	return fields
+}
+
 func getWeather(config *Config) (*weather, error) {
-	uri := fmt.Sprintf("https://api.openweathermap.org/data/2.5/weather?units=metric&lat=%f&lon=%f&appid=%s", config.WeatherMap.Latitude, config.WeatherMap.Longitude, config.WeatherMap.ApiKey)
-	res, err := http.Get(uri)
+	uri := fmt.Sprintf("%s?units=metric&lat=%f&lon=%f&appid=%s", owmBaseURL, config.WeatherMap.Latitude, config.WeatherMap.Longitude, config.WeatherMap.ApiKey)
+	res, err := httpClient.Get(uri)
 	if err != nil {
-		return nil, err
+		// The *url.Error contains the full URL including appid=<key>;
+		// return only the underlying error so the key never reaches the log.
+		var uerr *url.Error
+		if errors.As(err, &uerr) {
+			err = uerr.Err
+		}
+		return nil, fmt.Errorf("GET weather: %v", err)
 	}
 
 	data, err := ioutil.ReadAll(res.Body)
 	res.Body.Close()
 	if err != nil {
 		return nil, err
+	}
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("GET weather: status %d: %.200s", res.StatusCode, data)
 	}
 
 	var w weather
@@ -126,9 +158,9 @@ func getWeather(config *Config) (*weather, error) {
 
 type weather struct {
 	Main struct {
-		Temperature float64 `json:"temp"`
-		Humidity    float64 `json:"humidity"`
-		Pressure    float64 `json:"pressure"`
+		Temperature *float64 `json:"temp"`
+		Humidity    *float64 `json:"humidity"`
+		Pressure    *float64 `json:"pressure"`
 	} `json:"main"`
 }
 
