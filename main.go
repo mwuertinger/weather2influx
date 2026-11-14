@@ -2,10 +2,12 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
@@ -16,6 +18,9 @@ import (
 )
 
 var influxClient influxdb.Client
+
+// owmBaseURL is the OpenWeatherMap current-weather endpoint (a variable for tests).
+var owmBaseURL = "https://api.openweathermap.org/data/2.5/weather"
 
 func main() {
 	sigChan := make(chan os.Signal, 1)
@@ -117,16 +122,25 @@ func weatherFields(w *weather) map[string]interface{} {
 }
 
 func getWeather(config *Config) (*weather, error) {
-	uri := fmt.Sprintf("https://api.openweathermap.org/data/2.5/weather?units=metric&lat=%f&lon=%f&appid=%s", config.WeatherMap.Latitude, config.WeatherMap.Longitude, config.WeatherMap.ApiKey)
+	uri := fmt.Sprintf("%s?units=metric&lat=%f&lon=%f&appid=%s", owmBaseURL, config.WeatherMap.Latitude, config.WeatherMap.Longitude, config.WeatherMap.ApiKey)
 	res, err := http.Get(uri)
 	if err != nil {
-		return nil, err
+		// The *url.Error contains the full URL including appid=<key>;
+		// return only the underlying error so the key never reaches the log.
+		var uerr *url.Error
+		if errors.As(err, &uerr) {
+			err = uerr.Err
+		}
+		return nil, fmt.Errorf("GET weather: %v", err)
 	}
 
 	data, err := ioutil.ReadAll(res.Body)
 	res.Body.Close()
 	if err != nil {
 		return nil, err
+	}
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("GET weather: status %d: %.200s", res.StatusCode, data)
 	}
 
 	var w weather

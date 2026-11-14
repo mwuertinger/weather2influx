@@ -2,7 +2,10 @@ package main
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -48,5 +51,43 @@ func TestWeatherFields(t *testing.T) {
 				t.Errorf("weatherFields() = %v; want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestGetWeatherErrorHidesAPIKey(t *testing.T) {
+	// Port 1 on loopback refuses connections, so http.Get fails with a *url.Error.
+	old := owmBaseURL
+	owmBaseURL = "http://127.0.0.1:1/data/2.5/weather"
+	defer func() { owmBaseURL = old }()
+
+	cfg := &Config{}
+	cfg.WeatherMap.ApiKey = "SECRET-KEY-123"
+	_, err := getWeather(cfg)
+	if err == nil {
+		t.Fatal("getWeather() returned no error")
+	}
+	if strings.Contains(err.Error(), "SECRET-KEY-123") {
+		t.Errorf("error contains the API key: %v", err)
+	}
+}
+
+func TestGetWeatherNon200(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"cod":401,"message":"Invalid API key"}`))
+	}))
+	defer srv.Close()
+	old := owmBaseURL
+	owmBaseURL = srv.URL
+	defer func() { owmBaseURL = old }()
+
+	cfg := &Config{}
+	cfg.WeatherMap.ApiKey = "SECRET-KEY-123"
+	_, err := getWeather(cfg)
+	if err == nil || !strings.Contains(err.Error(), "status 401") || !strings.Contains(err.Error(), "Invalid API key") {
+		t.Errorf("getWeather() error = %v; want status 401 with the API message", err)
+	}
+	if err != nil && strings.Contains(err.Error(), "SECRET-KEY-123") {
+		t.Errorf("error contains the API key: %v", err)
 	}
 }
