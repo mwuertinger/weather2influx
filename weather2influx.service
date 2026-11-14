@@ -1,10 +1,88 @@
+# Systemd unit for weather2influx on hal. Install to /etc/systemd/system/.
+#
+# Runs as a transient, unprivileged user (DynamicUser=) without any
+# capabilities and with a read-only view of the file system. The config
+# contains the OpenWeatherMap API key, so it is kept root-only (mode 0600) and
+# handed to the service as a credential. Check the result with:
+#   systemd-analyze security weather2influx.service
+
 [Unit]
-After=network.target
+Description=OpenWeatherMap current weather to InfluxDB
+Documentation=https://github.com/mwuertinger/weather2influx
+Wants=network-online.target
+After=network-online.target docker.service
 
 [Service]
-DynamicUser=true
-ExecStart=/usr/local/bin/weather2influx /etc/weather2influx/weather2influx.conf
+Type=exec
+# %d is the credentials directory, only readable by this service.
+LoadCredential=weather2influx.conf:/etc/weather2influx/weather2influx.conf
+ExecStart=/usr/local/bin/weather2influx %d/weather2influx.conf
 Restart=always
+RestartSec=10s
+
+# Identity: random UID/GID allocated at start, no access to other users' files.
+DynamicUser=yes
+PrivateUsers=yes
+UMask=0077
+
+# No privileges at all.
+CapabilityBoundingSet=
+AmbientCapabilities=
+NoNewPrivileges=yes
+RestrictSUIDSGID=yes
+
+# File system: everything read-only, no home directories, no devices, private
+# /tmp, and nothing but the binary itself may be executed. The binary must be
+# statically linked (CGO_ENABLED=0) for that.
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+DevicePolicy=closed
+ProtectProc=invisible
+ProcSubset=pid
+NoExecPaths=/
+ExecPaths=/usr/local/bin/weather2influx
+MemoryDenyWriteExecute=yes
+# The host's /dev/shm and /dev/mqueue stay visible and writable even with
+# PrivateDevices= (shared memory, POSIX message queues); not needed.
+InaccessiblePaths=/dev/shm /dev/mqueue
+
+# Kernel attack surface.
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+PrivateIPC=yes
+RemoveIPC=yes
+KeyringMode=private
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+SystemCallErrorNumber=EPERM
+
+# Network: outgoing IPv4/IPv6 only (DNS, api.openweathermap.org and InfluxDB at
+# [::1]:8086). The pure-Go resolver of a static build needs no AF_UNIX. The API
+# is public, so outbound internet is not restricted.
+RestrictAddressFamilies=AF_INET AF_INET6
+# Network egress: no private (RFC 1918), CGNAT, link-local, ULA, multicast or
+# broadcast addresses, and no IPv4 loopback (127.0.0.0/8, which includes Tor's
+# SOCKS port), except the two DNS resolvers on the router. Not covered: LAN
+# hosts' global IPv6 addresses (the ISP-delegated prefix rotates, so it can't be
+# listed here) and other ports on the resolver addresses (IPAddressAllow= cannot
+# filter by port). ::1 is not denied.
+# InfluxDB must be reached as [::1]:8086 (docker-proxy); 127.0.0.1:8086 is
+# DNATed by Docker to the container's 172.18.0.0/16 address and denied anyway.
+IPAddressDeny=127.0.0.0/8 10.0.0.0/8 100.64.0.0/10 172.16.0.0/12 192.168.0.0/16
+IPAddressDeny=169.254.0.0/16 255.255.255.255/32 fc00::/7 fe80::/10 multicast
+IPAddressAllow=192.168.178.1/32 fd00::3681:c4ff:fe07:1275/128
+
+TasksMax=64
 
 [Install]
-WantedBy = multi-user.target
+WantedBy=multi-user.target
