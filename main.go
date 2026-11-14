@@ -37,7 +37,10 @@ func main() {
 		return
 	}
 
-	log.Printf("Initialized with config: %v", config)
+	logConfig := *config
+	logConfig.WeatherMap.ApiKey = "<redacted>"
+	logConfig.Influx.Token = "<redacted>"
+	log.Printf("Initialized with config: %+v", logConfig)
 
 	ticker := time.NewTicker(config.Interval)
 	for {
@@ -76,15 +79,9 @@ func writeToInflux(weather *weather) error {
 		return err
 	}
 	tags := map[string]string{"location": "Outdoor"}
-	fields := map[string]interface{}{}
-	if weather.Main.Pressure > 0 {
-		fields["pressure"] = weather.Main.Pressure
-	}
-	if weather.Main.Temperature > 0 {
-		fields["temperature"] = weather.Main.Temperature
-	}
-	if weather.Main.Humidity > 0 {
-		fields["humidity"] = weather.Main.Humidity
+	fields := weatherFields(weather)
+	if len(fields) == 0 {
+		return fmt.Errorf("no measurements in API response")
 	}
 
 	log.Printf("writing to influx: %+v", fields)
@@ -100,6 +97,23 @@ func writeToInflux(weather *weather) error {
 		return err
 	}
 	return nil
+}
+
+// weatherFields returns the InfluxDB fields for w. Only values missing from
+// the API response are skipped; zero and negative values (e.g. temperatures
+// at or below 0 °C) are valid measurements.
+func weatherFields(w *weather) map[string]interface{} {
+	fields := map[string]interface{}{}
+	if w.Main.Pressure != nil {
+		fields["pressure"] = *w.Main.Pressure
+	}
+	if w.Main.Temperature != nil {
+		fields["temperature"] = *w.Main.Temperature
+	}
+	if w.Main.Humidity != nil {
+		fields["humidity"] = *w.Main.Humidity
+	}
+	return fields
 }
 
 func getWeather(config *Config) (*weather, error) {
@@ -126,9 +140,9 @@ func getWeather(config *Config) (*weather, error) {
 
 type weather struct {
 	Main struct {
-		Temperature float64 `json:"temp"`
-		Humidity    float64 `json:"humidity"`
-		Pressure    float64 `json:"pressure"`
+		Temperature *float64 `json:"temp"`
+		Humidity    *float64 `json:"humidity"`
+		Pressure    *float64 `json:"pressure"`
 	} `json:"main"`
 }
 
