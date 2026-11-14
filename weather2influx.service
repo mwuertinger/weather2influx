@@ -1,10 +1,74 @@
+# Systemd unit for weather2influx on hal. Install to /etc/systemd/system/.
+#
+# Runs as a transient, unprivileged user (DynamicUser=) without any
+# capabilities and with a read-only view of the file system. The config
+# contains the OpenWeatherMap API key, so it is kept root-only (mode 0600) and
+# handed to the service as a credential. Check the result with:
+#   systemd-analyze security weather2influx.service
+
 [Unit]
-After=network.target
+Description=OpenWeatherMap current weather to InfluxDB
+Documentation=https://github.com/mwuertinger/weather2influx
+Wants=network-online.target
+After=network-online.target docker.service
 
 [Service]
-DynamicUser=true
-ExecStart=/usr/local/bin/weather2influx /etc/weather2influx/weather2influx.conf
+Type=exec
+# %d is the credentials directory, only readable by this service.
+LoadCredential=weather2influx.conf:/etc/weather2influx/weather2influx.conf
+ExecStart=/usr/local/bin/weather2influx %d/weather2influx.conf
 Restart=always
+RestartSec=10s
+
+# Identity: random UID/GID allocated at start, no access to other users' files.
+DynamicUser=yes
+PrivateUsers=yes
+UMask=0077
+
+# No privileges at all.
+CapabilityBoundingSet=
+AmbientCapabilities=
+NoNewPrivileges=yes
+RestrictSUIDSGID=yes
+
+# File system: everything read-only, no home directories, no devices, private
+# /tmp, and nothing but the binary itself may be executed. The binary must be
+# statically linked (CGO_ENABLED=0) for that.
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+DevicePolicy=closed
+ProtectProc=invisible
+ProcSubset=pid
+NoExecPaths=/
+ExecPaths=/usr/local/bin/weather2influx
+MemoryDenyWriteExecute=yes
+
+# Kernel attack surface.
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+PrivateIPC=yes
+RemoveIPC=yes
+KeyringMode=private
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+SystemCallErrorNumber=EPERM
+
+# Network: outgoing IPv4/IPv6 only (DNS, api.openweathermap.org and InfluxDB at
+# [::1]:8086). The pure-Go resolver of a static build needs no AF_UNIX. The API
+# is public, so there is no IPAddressAllow=.
+RestrictAddressFamilies=AF_INET AF_INET6
+
+TasksMax=64
 
 [Install]
-WantedBy = multi-user.target
+WantedBy=multi-user.target
