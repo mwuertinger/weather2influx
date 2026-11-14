@@ -19,6 +19,10 @@ import (
 
 var influxClient influxdb.Client
 
+// httpClient has a timeout so that a hung connection cannot stop the ticker
+// loop for good (http.DefaultClient has none).
+var httpClient = &http.Client{Timeout: 30 * time.Second}
+
 // owmBaseURL is the OpenWeatherMap current-weather endpoint (a variable for tests).
 var owmBaseURL = "https://api.openweathermap.org/data/2.5/weather"
 
@@ -123,7 +127,7 @@ func weatherFields(w *weather) map[string]interface{} {
 
 func getWeather(config *Config) (*weather, error) {
 	uri := fmt.Sprintf("%s?units=metric&lat=%f&lon=%f&appid=%s", owmBaseURL, config.WeatherMap.Latitude, config.WeatherMap.Longitude, config.WeatherMap.ApiKey)
-	res, err := http.Get(uri)
+	res, err := httpClient.Get(uri)
 	if err != nil {
 		// The *url.Error contains the full URL including appid=<key>;
 		// return only the underlying error so the key never reaches the log.
